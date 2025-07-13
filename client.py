@@ -29,14 +29,12 @@ class ScreenShareClient:
         signal.signal(signal.SIGTERM, self.signal_handler)
         atexit.register(self.cleanup)
         
-        # Скрываем консольное окно
-        self.hide_console()
-        
         # Показываем диалог подключения только один раз
         if not self.show_connection_dialog():
             sys.exit(0)
             
-        # Скрываем приложение полностью
+        # Скрываем консольное окно и приложение после ввода данных
+        self.hide_console()
         self.hide_application()
         
     def signal_handler(self, signum, frame):

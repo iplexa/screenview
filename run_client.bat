@@ -8,40 +8,32 @@ echo    Screen Share Client
 echo ========================================
 echo.
 
-:: Проверяем наличие Python
+:: Check for Python
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ERROR] Python не найден в системе!
-    echo Установите Python с https://python.org
+    echo [ERROR] Python not found!
+    echo Please install Python from https://python.org
     pause
     exit /b 1
 )
 
-:: Проверяем наличие виртуального окружения
-if exist "venv\Scripts\activate.bat" (
-    echo [INFO] Активируем виртуальное окружение...
-    call venv\Scripts\activate.bat
-) else (
-    echo [INFO] Виртуальное окружение не найдено, используем системный Python
-)
-
-:: Проверяем наличие необходимых библиотек
-echo [INFO] Проверяем зависимости...
+:: Check required libraries
+echo [INFO] Checking dependencies...
 python -c "import cv2, numpy, pyautogui, pynput, tkinter" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ERROR] Не все необходимые библиотеки установлены!
-    echo Установите зависимости: pip install -r requirements.txt
+    echo [ERROR] Not all required libraries are installed!
+    echo Please run: pip install -r requirements.txt
     pause
     exit /b 1
 )
 
-echo [INFO] Запускаем клиент...
-echo [INFO] Введите IP адрес сервера и порт в диалоговом окне
+echo [INFO] Starting client...
+echo [INFO] Enter server IP and port in the dialog window
 echo.
 
-:: Запускаем клиент
+:: Start client
 python client.py
 
 echo.
-echo [INFO] Клиент завершен
+echo [INFO] Client finished
 pause 

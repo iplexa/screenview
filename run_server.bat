@@ -8,41 +8,32 @@ echo    Screen Share Server
 echo ========================================
 echo.
 
-:: Проверяем наличие Python
+:: Check for Python
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ERROR] Python не найден в системе!
-    echo Установите Python с https://python.org
+    echo [ERROR] Python not found!
+    echo Please install Python from https://python.org
     pause
     exit /b 1
 )
 
-:: Проверяем наличие виртуального окружения
-if exist "venv\Scripts\activate.bat" (
-    echo [INFO] Активируем виртуальное окружение...
-    call venv\Scripts\activate.bat
-) else (
-    echo [INFO] Виртуальное окружение не найдено, используем системный Python
-)
-
-:: Проверяем наличие необходимых библиотек
-echo [INFO] Проверяем зависимости...
+:: Check required libraries
+echo [INFO] Checking dependencies...
 python -c "import cv2, numpy, pyautogui, pynput, tkinter" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ERROR] Не все необходимые библиотеки установлены!
-    echo Установите зависимости: pip install -r requirements.txt
+    echo [ERROR] Not all required libraries are installed!
+    echo Please run: pip install -r requirements.txt
     pause
     exit /b 1
 )
 
-echo [INFO] Запускаем сервер...
-echo [INFO] Сервер будет доступен на порту 9999
-echo [INFO] IP адрес: %COMPUTERNAME%
+echo [INFO] Starting server...
+echo [INFO] Server will be available on port 9999
 echo.
 
-:: Запускаем сервер
+:: Start server
 python server.py
 
 echo.
-echo [INFO] Сервер завершен
+echo [INFO] Server finished
 pause 
