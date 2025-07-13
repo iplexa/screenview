@@ -26,7 +26,7 @@ class ScreenShareServer:
     def create_gui(self):
         self.root = tk.Tk()
         self.root.title("Screen Share Server - Remote Viewer")
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x900")
         self.root.configure(bg='#2c3e50')
         
         # Стили
@@ -36,12 +36,12 @@ class ScreenShareServer:
         # Заголовок
         title_label = tk.Label(self.root, text="Remote Screen Viewer", 
                               font=title_font, bg='#2c3e50', fg='white')
-        title_label.pack(pady=10)
+        title_label.pack(pady=5)
         
         # Информация о подключении
         self.status_label = tk.Label(self.root, text="Status: Waiting for connection...", 
                                     font=('Arial', 10), bg='#2c3e50', fg='#ecf0f1')
-        self.status_label.pack(pady=5)
+        self.status_label.pack(pady=2)
         
         self.ip_label = tk.Label(self.root, text=f"IP: {socket.gethostbyname(socket.gethostname())}", 
                                 font=('Arial', 10), bg='#2c3e50', fg='#ecf0f1')
@@ -53,41 +53,70 @@ class ScreenShareServer:
         
         # Кнопки управления
         button_frame = tk.Frame(self.root, bg='#2c3e50')
-        button_frame.pack(pady=10)
+        button_frame.pack(pady=5)
         
         self.start_button = tk.Button(button_frame, text="Start Server", 
                                      command=self.start_server, font=button_font,
                                      bg='#27ae60', fg='white', relief='flat', padx=20)
-        self.start_button.pack(side=tk.LEFT, padx=10)
+        self.start_button.pack(side=tk.LEFT, padx=5)
         
         self.stop_button = tk.Button(button_frame, text="Stop Server", 
                                     command=self.stop_server, font=button_font,
                                     bg='#e74c3c', fg='white', relief='flat', padx=20)
-        self.stop_button.pack(side=tk.LEFT, padx=10)
+        self.stop_button.pack(side=tk.LEFT, padx=5)
         self.stop_button.config(state='disabled')
         
         # Кнопка управления
-        self.control_button = tk.Button(self.root, text="Enable Remote Control", 
+        self.control_button = tk.Button(button_frame, text="Enable Remote Control", 
                                        command=self.toggle_control, font=button_font,
                                        bg='#3498db', fg='white', relief='flat', padx=20)
-        self.control_button.pack(pady=5)
+        self.control_button.pack(side=tk.LEFT, padx=5)
         self.control_button.config(state='disabled')
+        
+        # Кнопка полноэкранного режима
+        self.fullscreen_button = tk.Button(button_frame, text="Fullscreen", 
+                                          command=self.toggle_fullscreen, font=button_font,
+                                          bg='#9b59b6', fg='white', relief='flat', padx=20)
+        self.fullscreen_button.pack(side=tk.LEFT, padx=5)
+        self.fullscreen_button.config(state='disabled')
         
         # Фрейм для отображения экрана
         screen_frame = tk.Frame(self.root, bg='#34495e', relief='sunken', bd=2)
-        screen_frame.pack(pady=10, padx=20, fill='both', expand=True)
+        screen_frame.pack(pady=5, padx=10, fill='both', expand=True)
+        
+        # Создаем Canvas для отображения экрана с прокруткой
+        self.canvas = tk.Canvas(screen_frame, bg='#34495e', highlightthickness=0)
+        scrollbar_v = tk.Scrollbar(screen_frame, orient="vertical", command=self.canvas.yview)
+        scrollbar_h = tk.Scrollbar(screen_frame, orient="horizontal", command=self.canvas.xview)
+        
+        self.canvas.configure(yscrollcommand=scrollbar_v.set, xscrollcommand=scrollbar_h.set)
+        
+        # Размещаем элементы
+        scrollbar_v.pack(side="right", fill="y")
+        scrollbar_h.pack(side="bottom", fill="x")
+        self.canvas.pack(side="left", fill="both", expand=True)
         
         # Метка для отображения экрана клиента
-        self.screen_label = tk.Label(screen_frame, text="Waiting for client screen...", 
+        self.screen_label = tk.Label(self.canvas, text="Waiting for client screen...", 
                                     bg='#34495e', fg='white', font=('Arial', 14))
-        self.screen_label.pack(expand=True, fill='both')
+        self.canvas.create_window(400, 300, window=self.screen_label, anchor="center")
         
         # Лог событий
-        self.log_text = tk.Text(self.root, height=6, width=80, bg='#34495e', fg='white')
-        self.log_text.pack(pady=10, padx=20)
+        log_frame = tk.Frame(self.root, bg='#2c3e50')
+        log_frame.pack(pady=5, padx=10, fill='x')
+        
+        log_label = tk.Label(log_frame, text="Event Log:", font=('Arial', 10, 'bold'), 
+                            bg='#2c3e50', fg='white')
+        log_label.pack(anchor='w')
+        
+        self.log_text = tk.Text(log_frame, height=4, width=100, bg='#34495e', fg='white')
+        self.log_text.pack(fill='x')
         
         # Обработчик закрытия окна
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Переменные для полноэкранного режима
+        self.is_fullscreen = False
         
     def log_message(self, message):
         """Добавляет сообщение в лог"""
@@ -129,6 +158,7 @@ class ScreenShareServer:
                 self.log_message(f"Client connected from {self.client_address}")
                 self.status_label.config(text=f"Status: Connected to {self.client_address[0]}")
                 self.control_button.config(state='normal')
+                self.fullscreen_button.config(state='normal')
                 
                 # Запускаем потоки для обработки данных
                 self.start_data_threads()
@@ -215,14 +245,51 @@ class ScreenShareServer:
         finally:
             self.disconnect_client()
             
+    def toggle_fullscreen(self):
+        """Включает/выключает полноэкранный режим"""
+        self.is_fullscreen = not self.is_fullscreen
+        if self.is_fullscreen:
+            self.root.attributes('-fullscreen', True)
+            self.fullscreen_button.config(text="Exit Fullscreen", bg='#e67e22')
+            self.log_message("Fullscreen mode enabled")
+        else:
+            self.root.attributes('-fullscreen', False)
+            self.fullscreen_button.config(text="Fullscreen", bg='#9b59b6')
+            self.log_message("Fullscreen mode disabled")
+            
     def update_screen(self, photo, frame_count):
         """Обновляет отображение экрана клиента"""
+        # Удаляем предыдущее изображение
+        self.canvas.delete("all")
+        
+        # Сохраняем размер кадра для масштабирования координат мыши
+        self.last_frame_size = (photo.width(), photo.height())
+        
+        # Получаем размеры canvas
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            # Canvas еще не отрисован, используем размеры окна
+            canvas_width = 1200
+            canvas_height = 600
+        
+        # Размещаем изображение по центру canvas
+        x = canvas_width // 2
+        y = canvas_height // 2
+        
+        # Создаем новое изображение в canvas
+        self.canvas.create_image(x, y, image=photo, anchor="center")
         self.screen_label.config(image=photo)
         self.screen_label.image = photo  # Сохраняем ссылку
         
         # Обновляем информацию
-        info_text = f"Client Screen - Frame: {frame_count}"
-        self.screen_label.config(text=info_text)
+        info_text = f"Client Screen - Frame: {frame_count} | Size: {photo.width()}x{photo.height()}"
+        self.canvas.create_text(10, 10, text=info_text, anchor="nw", 
+                               fill="white", font=("Arial", 10, "bold"))
+        
+        # Обновляем область прокрутки
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         
     def send_control(self):
         """Отправляет команды управления клиенту"""
@@ -239,31 +306,11 @@ class ScreenShareServer:
             
     def setup_control_handlers(self):
         """Настраивает обработчики событий управления"""
-        def on_mouse_move(x, y):
-            if self.control_enabled and self.client_socket:
-                try:
-                    command = {
-                        'type': 'mouse_move',
-                        'x': x,
-                        'y': y
-                    }
-                    self.client_socket.send(pickle.dumps(command))
-                except:
-                    pass
-                    
-        def on_mouse_click(x, y, button, pressed):
-            if pressed and self.control_enabled and self.client_socket:
-                try:
-                    command = {
-                        'type': 'mouse_click',
-                        'x': x,
-                        'y': y,
-                        'button': 'left' if button == mouse.Button.left else 'right'
-                    }
-                    self.client_socket.send(pickle.dumps(command))
-                except:
-                    pass
-                    
+        # Привязываем события мыши к canvas
+        self.canvas.bind("<Motion>", self.on_mouse_move)
+        self.canvas.bind("<Button-1>", self.on_mouse_click)
+        self.canvas.bind("<Button-3>", self.on_mouse_right_click)
+        
         def on_key_press(key):
             if self.control_enabled and self.client_socket:
                 try:
@@ -275,15 +322,106 @@ class ScreenShareServer:
                 except:
                     pass
                     
-        # Запускаем слушатели
-        self.mouse_listener = mouse.Listener(
-            on_move=on_mouse_move,
-            on_click=on_mouse_click)
-        self.mouse_listener.start()
-        
+        # Запускаем слушатель клавиатуры
         self.keyboard_listener = keyboard.Listener(
             on_press=on_key_press)
         self.keyboard_listener.start()
+        
+    def on_mouse_move(self, event):
+        """Обработчик движения мыши"""
+        if self.control_enabled and self.client_socket and hasattr(self, 'last_frame_size'):
+            try:
+                # Получаем размеры canvas и изображения
+                canvas_width = self.canvas.winfo_width()
+                canvas_height = self.canvas.winfo_height()
+                
+                if canvas_width > 1 and canvas_height > 1 and self.last_frame_size:
+                    frame_width, frame_height = self.last_frame_size
+                    
+                    # Вычисляем масштаб
+                    scale_x = frame_width / canvas_width
+                    scale_y = frame_height / canvas_height
+                    
+                    # Масштабируем координаты
+                    scaled_x = int(event.x * scale_x)
+                    scaled_y = int(event.y * scale_y)
+                    
+                    # Ограничиваем координаты размером экрана клиента
+                    scaled_x = max(0, min(scaled_x, frame_width - 1))
+                    scaled_y = max(0, min(scaled_y, frame_height - 1))
+                    
+                    command = {
+                        'type': 'mouse_move',
+                        'x': scaled_x,
+                        'y': scaled_y
+                    }
+                    self.client_socket.send(pickle.dumps(command))
+            except:
+                pass
+                
+    def on_mouse_click(self, event):
+        """Обработчик клика левой кнопкой мыши"""
+        if self.control_enabled and self.client_socket and hasattr(self, 'last_frame_size'):
+            try:
+                canvas_width = self.canvas.winfo_width()
+                canvas_height = self.canvas.winfo_height()
+                
+                if canvas_width > 1 and canvas_height > 1 and self.last_frame_size:
+                    frame_width, frame_height = self.last_frame_size
+                    
+                    # Вычисляем масштаб
+                    scale_x = frame_width / canvas_width
+                    scale_y = frame_height / canvas_height
+                    
+                    # Масштабируем координаты
+                    scaled_x = int(event.x * scale_x)
+                    scaled_y = int(event.y * scale_y)
+                    
+                    # Ограничиваем координаты
+                    scaled_x = max(0, min(scaled_x, frame_width - 1))
+                    scaled_y = max(0, min(scaled_y, frame_height - 1))
+                    
+                    command = {
+                        'type': 'mouse_click',
+                        'x': scaled_x,
+                        'y': scaled_y,
+                        'button': 'left'
+                    }
+                    self.client_socket.send(pickle.dumps(command))
+            except:
+                pass
+                
+    def on_mouse_right_click(self, event):
+        """Обработчик клика правой кнопкой мыши"""
+        if self.control_enabled and self.client_socket and hasattr(self, 'last_frame_size'):
+            try:
+                canvas_width = self.canvas.winfo_width()
+                canvas_height = self.canvas.winfo_height()
+                
+                if canvas_width > 1 and canvas_height > 1 and self.last_frame_size:
+                    frame_width, frame_height = self.last_frame_size
+                    
+                    # Вычисляем масштаб
+                    scale_x = frame_width / canvas_width
+                    scale_y = frame_height / canvas_height
+                    
+                    # Масштабируем координаты
+                    scaled_x = int(event.x * scale_x)
+                    scaled_y = int(event.y * scale_y)
+                    
+                    # Ограничиваем координаты
+                    scaled_x = max(0, min(scaled_x, frame_width - 1))
+                    scaled_y = max(0, min(scaled_y, frame_height - 1))
+                    
+                    command = {
+                        'type': 'mouse_click',
+                        'x': scaled_x,
+                        'y': scaled_y,
+                        'button': 'right'
+                    }
+                    self.client_socket.send(pickle.dumps(command))
+            except:
+                pass
             
     def toggle_control(self):
         """Включает/выключает удаленное управление"""
@@ -304,7 +442,13 @@ class ScreenShareServer:
             
         self.status_label.config(text="Status: Waiting for connection...")
         self.control_button.config(state='disabled')
+        self.fullscreen_button.config(state='disabled')
+        
+        # Очищаем canvas и показываем сообщение
+        self.canvas.delete("all")
         self.screen_label.config(text="Waiting for client screen...", image='')
+        self.canvas.create_window(400, 300, window=self.screen_label, anchor="center")
+        
         self.log_message("Client disconnected")
         
     def stop_server(self):

