@@ -110,8 +110,10 @@ class ScreenShareClient:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.connect((self.server_ip, self.server_port))
             self.running = True
+            print(f"[CLIENT] Connected to server {self.server_ip}:{self.server_port}")
             return True
         except Exception as e:
+            print(f"[CLIENT] Failed to connect to server: {e}")
             return False
             
     def send_screen(self):
@@ -155,20 +157,24 @@ class ScreenShareClient:
         """Принимает команды управления от сервера"""
         try:
             while self.running and self.socket:
-                # Получаем команду
                 command_data = self.socket.recv(1024)
                 if not command_data:
+                    print("[CLIENT] No command data received, breaking loop.")
                     break
-                    
-                command = pickle.loads(command_data)
-                self.execute_command(command)
-                    
+                print("[CLIENT] Received raw command data:", command_data)
+                try:
+                    command = pickle.loads(command_data)
+                    print("[CLIENT] Unpickled command:", command)
+                    self.execute_command(command)
+                except Exception as e:
+                    print("[CLIENT] Error unpickling command:", e)
         except Exception as e:
-            pass
+            print("[CLIENT] Error in receive_control:", e)
             
     def execute_command(self, command):
         """Выполняет команду управления"""
         try:
+            print("[CLIENT] Executing command:", command)
             cmd_type = command.get('type')
             
             if cmd_type == 'mouse_move':
@@ -220,24 +226,27 @@ class ScreenShareClient:
                 pyautogui.hotkey(*keys)
                 
         except Exception as e:
-            pass
+            print("[CLIENT] Error in execute_command:", e)
             
     def run(self):
         """Запускает клиент"""
         if not self.connect_to_server():
+            print("[CLIENT] Could not connect to server, exiting.")
             return
-            
+
+        print("[CLIENT] Starting screen and control threads...")
+
         # Запускаем потоки
         screen_thread = threading.Thread(target=self.send_screen, daemon=True)
         screen_thread.start()
-        
+
         control_thread = threading.Thread(target=self.receive_control, daemon=True)
         control_thread.start()
-        
+
         # Основной цикл в отдельном потоке
         self.main_thread = threading.Thread(target=self.main_loop, daemon=True)
         self.main_thread.start()
-        
+
         # Ждем завершения основного потока
         self.main_thread.join()
             
