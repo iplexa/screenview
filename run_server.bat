@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 title Screen Share Server
 color 0b
 
