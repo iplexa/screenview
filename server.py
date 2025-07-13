@@ -25,8 +25,8 @@ class ScreenShareServer:
         
     def create_gui(self):
         self.root = tk.Tk()
-        self.root.title("Screen Share Server")
-        self.root.geometry("400x300")
+        self.root.title("Screen Share Server - Remote Viewer")
+        self.root.geometry("1200x800")
         self.root.configure(bg='#2c3e50')
         
         # Стили
@@ -34,14 +34,14 @@ class ScreenShareServer:
         button_font = ('Arial', 12)
         
         # Заголовок
-        title_label = tk.Label(self.root, text="Screen Share Server", 
+        title_label = tk.Label(self.root, text="Remote Screen Viewer", 
                               font=title_font, bg='#2c3e50', fg='white')
-        title_label.pack(pady=20)
+        title_label.pack(pady=10)
         
         # Информация о подключении
         self.status_label = tk.Label(self.root, text="Status: Waiting for connection...", 
                                     font=('Arial', 10), bg='#2c3e50', fg='#ecf0f1')
-        self.status_label.pack(pady=10)
+        self.status_label.pack(pady=5)
         
         self.ip_label = tk.Label(self.root, text=f"IP: {socket.gethostbyname(socket.gethostname())}", 
                                 font=('Arial', 10), bg='#2c3e50', fg='#ecf0f1')
@@ -53,7 +53,7 @@ class ScreenShareServer:
         
         # Кнопки управления
         button_frame = tk.Frame(self.root, bg='#2c3e50')
-        button_frame.pack(pady=20)
+        button_frame.pack(pady=10)
         
         self.start_button = tk.Button(button_frame, text="Start Server", 
                                      command=self.start_server, font=button_font,
@@ -70,11 +70,20 @@ class ScreenShareServer:
         self.control_button = tk.Button(self.root, text="Enable Remote Control", 
                                        command=self.toggle_control, font=button_font,
                                        bg='#3498db', fg='white', relief='flat', padx=20)
-        self.control_button.pack(pady=10)
+        self.control_button.pack(pady=5)
         self.control_button.config(state='disabled')
         
+        # Фрейм для отображения экрана
+        screen_frame = tk.Frame(self.root, bg='#34495e', relief='sunken', bd=2)
+        screen_frame.pack(pady=10, padx=20, fill='both', expand=True)
+        
+        # Метка для отображения экрана клиента
+        self.screen_label = tk.Label(screen_frame, text="Waiting for client screen...", 
+                                    bg='#34495e', fg='white', font=('Arial', 14))
+        self.screen_label.pack(expand=True, fill='both')
+        
         # Лог событий
-        self.log_text = tk.Text(self.root, height=8, width=45, bg='#34495e', fg='white')
+        self.log_text = tk.Text(self.root, height=6, width=80, bg='#34495e', fg='white')
         self.log_text.pack(pady=10, padx=20)
         
         # Обработчик закрытия окна
@@ -131,90 +140,157 @@ class ScreenShareServer:
                 
     def start_data_threads(self):
         """Запускает потоки для обработки данных"""
-        # Поток для отправки скриншотов
-        screen_thread = threading.Thread(target=self.send_screen)
+        # Поток для приема скриншотов от клиента
+        screen_thread = threading.Thread(target=self.receive_screen)
         screen_thread.daemon = True
         screen_thread.start()
         
-        # Поток для приема команд управления
-        control_thread = threading.Thread(target=self.receive_control)
+        # Поток для отправки команд управления клиенту
+        control_thread = threading.Thread(target=self.send_control)
         control_thread.daemon = True
         control_thread.start()
         
-    def send_screen(self):
-        """Отправляет скриншоты клиенту"""
+    def receive_screen(self):
+        """Принимает скриншоты от клиента и отображает их"""
         try:
-            while self.running and self.client_socket:
-                # Делаем скриншот
-                screenshot = pyautogui.screenshot()
-                frame = np.array(screenshot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                
-                # Сжимаем изображение
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
-                _, buffer = cv2.imencode('.jpg', frame, encode_param)
-                
-                # Отправляем размер данных и сами данные
-                data_size = len(buffer)
-                self.client_socket.send(struct.pack('!I', data_size))
-                self.client_socket.send(buffer.tobytes())
-                
-                time.sleep(0.1)  # 10 FPS
-                
-        except Exception as e:
-            self.log_message(f"Error sending screen: {e}")
-            self.disconnect_client()
+            self.log_message("Starting to receive screen from client...")
+            frame_count = 0
             
-    def receive_control(self):
-        """Принимает команды управления от клиента"""
-        try:
             while self.running and self.client_socket:
-                # Получаем команду
-                command_data = self.client_socket.recv(1024)
-                if not command_data:
+                try:
+                    # Получаем размер данных
+                    size_data = self.client_socket.recv(4)
+                    if len(size_data) != 4:
+                        self.log_message("Client disconnected")
+                        break
+                        
+                    data_size = struct.unpack('!I', size_data)[0]
+                    
+                    # Получаем данные изображения
+                    data = b''
+                    while len(data) < data_size:
+                        packet = self.client_socket.recv(data_size - len(data))
+                        if not packet:
+                            break
+                        data += packet
+                        
+                    if len(data) == data_size:
+                        # Декодируем изображение
+                        frame_data = np.frombuffer(data, dtype=np.uint8)
+                        frame = cv2.imdecode(frame_data, cv2.IMREAD_COLOR)
+                        
+                        if frame is not None:
+                            # Конвертируем BGR в RGB для PIL
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            
+                            # Конвертируем в PIL Image
+                            from PIL import Image, ImageTk
+                            pil_image = Image.fromarray(frame_rgb)
+                            
+                            # Изменяем размер для отображения
+                            display_width = 800
+                            display_height = 600
+                            pil_image = pil_image.resize((display_width, display_height), Image.Resampling.LANCZOS)
+                            
+                            # Конвертируем в PhotoImage
+                            photo = ImageTk.PhotoImage(pil_image)
+                            
+                            # Обновляем GUI в главном потоке
+                            self.root.after(0, self.update_screen, photo, frame_count)
+                            
+                            frame_count += 1
+                            if frame_count % 100 == 0:
+                                self.log_message(f"Received {frame_count} frames from client")
+                        else:
+                            self.log_message("Failed to decode frame from client")
+                    else:
+                        self.log_message(f"Data size mismatch: expected {data_size}, got {len(data)}")
+                        
+                except Exception as e:
+                    self.log_message(f"Error receiving screen: {e}")
                     break
                     
-                command = pickle.loads(command_data)
-                self.log_message(f"Received command: {command}")
-                
-                if self.control_enabled:
-                    self.execute_command(command)
-                    
         except Exception as e:
-            self.log_message(f"Error receiving control: {e}")
+            self.log_message(f"Error in receive_screen: {e}")
+        finally:
             self.disconnect_client()
             
-    def execute_command(self, command):
-        """Выполняет команду управления"""
+    def update_screen(self, photo, frame_count):
+        """Обновляет отображение экрана клиента"""
+        self.screen_label.config(image=photo)
+        self.screen_label.image = photo  # Сохраняем ссылку
+        
+        # Обновляем информацию
+        info_text = f"Client Screen - Frame: {frame_count}"
+        self.screen_label.config(text=info_text)
+        
+    def send_control(self):
+        """Отправляет команды управления клиенту"""
         try:
-            cmd_type = command.get('type')
+            # Настраиваем обработчики событий мыши и клавиатуры
+            self.setup_control_handlers()
             
-            if cmd_type == 'mouse_move':
-                x, y = command['x'], command['y']
-                pyautogui.moveTo(x, y)
-                
-            elif cmd_type == 'mouse_click':
-                x, y = command['x'], command['y']
-                button = command.get('button', 'left')
-                pyautogui.click(x, y, button=button)
-                
-            elif cmd_type == 'key_press':
-                key = command['key']
-                pyautogui.press(key)
-                
-            elif cmd_type == 'key_type':
-                text = command['text']
-                pyautogui.typewrite(text)
+            # Ждем завершения
+            while self.running and self.client_socket:
+                time.sleep(0.1)
                 
         except Exception as e:
-            self.log_message(f"Error executing command: {e}")
+            self.log_message(f"Error in send_control: {e}")
+            
+    def setup_control_handlers(self):
+        """Настраивает обработчики событий управления"""
+        def on_mouse_move(x, y):
+            if self.control_enabled and self.client_socket:
+                try:
+                    command = {
+                        'type': 'mouse_move',
+                        'x': x,
+                        'y': y
+                    }
+                    self.client_socket.send(pickle.dumps(command))
+                except:
+                    pass
+                    
+        def on_mouse_click(x, y, button, pressed):
+            if pressed and self.control_enabled and self.client_socket:
+                try:
+                    command = {
+                        'type': 'mouse_click',
+                        'x': x,
+                        'y': y,
+                        'button': 'left' if button == mouse.Button.left else 'right'
+                    }
+                    self.client_socket.send(pickle.dumps(command))
+                except:
+                    pass
+                    
+        def on_key_press(key):
+            if self.control_enabled and self.client_socket:
+                try:
+                    command = {
+                        'type': 'key_press',
+                        'key': key.char if hasattr(key, 'char') else str(key)
+                    }
+                    self.client_socket.send(pickle.dumps(command))
+                except:
+                    pass
+                    
+        # Запускаем слушатели
+        self.mouse_listener = mouse.Listener(
+            on_move=on_mouse_move,
+            on_click=on_mouse_click)
+        self.mouse_listener.start()
+        
+        self.keyboard_listener = keyboard.Listener(
+            on_press=on_key_press)
+        self.keyboard_listener.start()
             
     def toggle_control(self):
         """Включает/выключает удаленное управление"""
         self.control_enabled = not self.control_enabled
         if self.control_enabled:
             self.control_button.config(text="Disable Remote Control", bg='#e67e22')
-            self.log_message("Remote control enabled")
+            self.log_message("Remote control enabled - you can now control client's computer")
         else:
             self.control_button.config(text="Enable Remote Control", bg='#3498db')
             self.log_message("Remote control disabled")
@@ -228,6 +304,7 @@ class ScreenShareServer:
             
         self.status_label.config(text="Status: Waiting for connection...")
         self.control_button.config(state='disabled')
+        self.screen_label.config(text="Waiting for client screen...", image='')
         self.log_message("Client disconnected")
         
     def stop_server(self):

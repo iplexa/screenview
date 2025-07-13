@@ -2,7 +2,7 @@
 setlocal
 
 echo ========================================
-echo Screen Share Server Launcher
+echo Silent Screen Share Client Launcher
 echo ========================================
 
 REM Проверяем наличие Python
@@ -54,11 +54,22 @@ if %errorlevel% neq 0 (
     echo Continuing anyway...
 )
 
-REM Запускаем сервер
-echo.
-echo Starting Screen Share Server...
-echo ========================================
-%PYTHON_CMD% server.py
+REM Проверяем аргументы
+if "%1"=="" (
+    echo Usage: run_silent_client.bat [SERVER_IP] [PORT]
+    echo Example: run_silent_client.bat 192.168.1.100 9999
+    echo.
+    echo Starting silent client with default settings...
+    %PYTHON_CMD% client.py --silent
+) else (
+    if "%2"=="" (
+        echo Starting silent client with IP: %1, Port: 9999
+        %PYTHON_CMD% client.py --silent %1 9999
+    ) else (
+        echo Starting silent client with IP: %1, Port: %2
+        %PYTHON_CMD% client.py --silent %1 %2
+    )
+)
 
-pause
+echo Silent client started. Check Task Manager to stop it.
 endlocal 
