@@ -125,8 +125,20 @@ class ScreenShareClient:
                 frame = np.array(screenshot)
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
+                # Получаем размеры экрана
+                screen_width, screen_height = pyautogui.size()
+                
+                # Изменяем размер до HD (1280x720) или Full HD (1920x1080)
+                if screen_width >= 1920 and screen_height >= 1080:
+                    target_width, target_height = 1920, 1080
+                else:
+                    target_width, target_height = 1280, 720
+                
+                # Изменяем размер изображения
+                frame = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4)
+                
                 # Сжимаем изображение
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
                 _, buffer = cv2.imencode('.jpg', frame, encode_param)
                 
                 # Отправляем размер данных и сами данные
@@ -134,7 +146,7 @@ class ScreenShareClient:
                 self.socket.send(struct.pack('!I', data_size))
                 self.socket.send(buffer.tobytes())
                 
-                time.sleep(0.1)  # 10 FPS
+                time.sleep(0.05)  # 20 FPS для более плавной передачи
                 
         except Exception as e:
             pass
@@ -163,12 +175,39 @@ class ScreenShareClient:
             
             if cmd_type == 'mouse_move':
                 x, y = command['x'], command['y']
-                pyautogui.moveTo(x, y)
+                # Получаем размеры экрана для масштабирования
+                screen_width, screen_height = pyautogui.size()
+                # Масштабируем координаты обратно к реальному размеру экрана
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.moveTo(real_x, real_y)
                 
             elif cmd_type == 'mouse_click':
                 x, y = command['x'], command['y']
                 button = command.get('button', 'left')
-                pyautogui.click(x, y, button=button)
+                # Масштабируем координаты
+                screen_width, screen_height = pyautogui.size()
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.click(real_x, real_y, button=button)
+                
+            elif cmd_type == 'mouse_double_click':
+                x, y = command['x'], command['y']
+                button = command.get('button', 'left')
+                # Масштабируем координаты
+                screen_width, screen_height = pyautogui.size()
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.doubleClick(real_x, real_y, button=button)
+                
+            elif cmd_type == 'mouse_scroll':
+                x, y = command['x'], command['y']
+                clicks = command.get('clicks', 1)
+                # Масштабируем координаты
+                screen_width, screen_height = pyautogui.size()
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.scroll(clicks, x=real_x, y=real_y)
                 
             elif cmd_type == 'key_press':
                 key = command['key']
@@ -177,6 +216,10 @@ class ScreenShareClient:
             elif cmd_type == 'key_type':
                 text = command['text']
                 pyautogui.typewrite(text)
+                
+            elif cmd_type == 'key_combination':
+                keys = command['keys']
+                pyautogui.hotkey(*keys)
                 
         except Exception as e:
             pass
@@ -269,8 +312,20 @@ class SilentClient:
                 frame = np.array(screenshot)
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 
+                # Получаем размеры экрана
+                screen_width, screen_height = pyautogui.size()
+                
+                # Изменяем размер до HD (1280x720) или Full HD (1920x1080)
+                if screen_width >= 1920 and screen_height >= 1080:
+                    target_width, target_height = 1920, 1080
+                else:
+                    target_width, target_height = 1280, 720
+                
+                # Изменяем размер изображения
+                frame = cv2.resize(frame, (target_width, target_height), interpolation=cv2.INTER_LANCZOS4)
+                
                 # Сжимаем изображение
-                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
+                encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
                 _, buffer = cv2.imencode('.jpg', frame, encode_param)
                 
                 # Отправляем размер данных и сами данные
@@ -278,7 +333,7 @@ class SilentClient:
                 self.socket.send(struct.pack('!I', data_size))
                 self.socket.send(buffer.tobytes())
                 
-                time.sleep(0.1)  # 10 FPS
+                time.sleep(0.05)  # 20 FPS для более плавной передачи
                 
         except Exception as e:
             pass
@@ -305,12 +360,39 @@ class SilentClient:
             
             if cmd_type == 'mouse_move':
                 x, y = command['x'], command['y']
-                pyautogui.moveTo(x, y)
+                # Получаем размеры экрана для масштабирования
+                screen_width, screen_height = pyautogui.size()
+                # Масштабируем координаты обратно к реальному размеру экрана
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.moveTo(real_x, real_y)
                 
             elif cmd_type == 'mouse_click':
                 x, y = command['x'], command['y']
                 button = command.get('button', 'left')
-                pyautogui.click(x, y, button=button)
+                # Масштабируем координаты
+                screen_width, screen_height = pyautogui.size()
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.click(real_x, real_y, button=button)
+                
+            elif cmd_type == 'mouse_double_click':
+                x, y = command['x'], command['y']
+                button = command.get('button', 'left')
+                # Масштабируем координаты
+                screen_width, screen_height = pyautogui.size()
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.doubleClick(real_x, real_y, button=button)
+                
+            elif cmd_type == 'mouse_scroll':
+                x, y = command['x'], command['y']
+                clicks = command.get('clicks', 1)
+                # Масштабируем координаты
+                screen_width, screen_height = pyautogui.size()
+                real_x = int(x * screen_width / 1280) if screen_width < 1920 else int(x * screen_width / 1920)
+                real_y = int(y * screen_height / 720) if screen_height < 1080 else int(y * screen_height / 1080)
+                pyautogui.scroll(clicks, x=real_x, y=real_y)
                 
             elif cmd_type == 'key_press':
                 key = command['key']
@@ -319,6 +401,10 @@ class SilentClient:
             elif cmd_type == 'key_type':
                 text = command['text']
                 pyautogui.typewrite(text)
+                
+            elif cmd_type == 'key_combination':
+                keys = command['keys']
+                pyautogui.hotkey(*keys)
                 
         except Exception as e:
             pass

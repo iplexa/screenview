@@ -118,6 +118,10 @@ class ScreenShareServer:
         # Переменные для полноэкранного режима
         self.is_fullscreen = False
         
+        # Переменные для отслеживания кликов
+        self.last_click_time = 0
+        self.click_count = 0
+        
     def log_message(self, message):
         """Добавляет сообщение в лог"""
         timestamp = time.strftime("%H:%M:%S")
@@ -217,9 +221,20 @@ class ScreenShareServer:
                             from PIL import Image, ImageTk
                             pil_image = Image.fromarray(frame_rgb)
                             
-                            # Изменяем размер для отображения
-                            display_width = 800
-                            display_height = 600
+                            # Сохраняем оригинальный размер кадра
+                            self.original_frame_size = (pil_image.width, pil_image.height)
+                            
+                            # Изменяем размер для отображения (максимум 1200x800)
+                            display_width = min(1200, pil_image.width)
+                            display_height = min(800, pil_image.height)
+                            
+                            # Сохраняем пропорции
+                            aspect_ratio = pil_image.width / pil_image.height
+                            if display_width / display_height > aspect_ratio:
+                                display_width = int(display_height * aspect_ratio)
+                            else:
+                                display_height = int(display_width / aspect_ratio)
+                            
                             pil_image = pil_image.resize((display_width, display_height), Image.Resampling.LANCZOS)
                             
                             # Конвертируем в PhotoImage
@@ -262,8 +277,8 @@ class ScreenShareServer:
         # Удаляем предыдущее изображение
         self.canvas.delete("all")
         
-        # Сохраняем размер кадра для масштабирования координат мыши
-        self.last_frame_size = (photo.width(), photo.height())
+        # Сохраняем размеры для масштабирования координат мыши
+        self.display_frame_size = (photo.width(), photo.height())
         
         # Получаем размеры canvas
         canvas_width = self.canvas.winfo_width()
@@ -284,7 +299,8 @@ class ScreenShareServer:
         self.screen_label.image = photo  # Сохраняем ссылку
         
         # Обновляем информацию
-        info_text = f"Client Screen - Frame: {frame_count} | Size: {photo.width()}x{photo.height()}"
+        original_size = getattr(self, 'original_frame_size', (0, 0))
+        info_text = f"Client Screen - Frame: {frame_count} | Display: {photo.width()}x{photo.height()} | Original: {original_size[0]}x{original_size[1]}"
         self.canvas.create_text(10, 10, text=info_text, anchor="nw", 
                                fill="white", font=("Arial", 10, "bold"))
         
@@ -310,118 +326,183 @@ class ScreenShareServer:
         self.canvas.bind("<Motion>", self.on_mouse_move)
         self.canvas.bind("<Button-1>", self.on_mouse_click)
         self.canvas.bind("<Button-3>", self.on_mouse_right_click)
+        self.canvas.bind("<Double-Button-1>", self.on_mouse_double_click)
+        self.canvas.bind("<MouseWheel>", self.on_mouse_scroll)
         
         def on_key_press(key):
             if self.control_enabled and self.client_socket:
                 try:
-                    command = {
-                        'type': 'key_press',
-                        'key': key.char if hasattr(key, 'char') else str(key)
-                    }
+                    # Обрабатываем специальные клавиши
+                    if hasattr(key, 'char') and key.char:
+                        command = {
+                            'type': 'key_press',
+                            'key': key.char
+                        }
+                    else:
+                        # Специальные клавиши
+                        key_name = str(key).replace("'", "")
+                        command = {
+                            'type': 'key_press',
+                            'key': key_name
+                        }
+                    
                     self.client_socket.send(pickle.dumps(command))
-                except:
-                    pass
+                    self.log_message(f"Sent key command: {command['key']}")
+                except Exception as e:
+                    self.log_message(f"Error sending key command: {e}")
                     
         # Запускаем слушатель клавиатуры
         self.keyboard_listener = keyboard.Listener(
             on_press=on_key_press)
         self.keyboard_listener.start()
         
+    def scale_coordinates(self, event_x, event_y):
+        """Масштабирует координаты мыши от отображаемого размера к оригинальному"""
+        if not hasattr(self, 'display_frame_size') or not hasattr(self, 'original_frame_size'):
+            return 0, 0
+            
+        display_width, display_height = self.display_frame_size
+        original_width, original_height = self.original_frame_size
+        
+        # Получаем размеры canvas
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            return 0, 0
+        
+        # Вычисляем позицию изображения в canvas
+        image_x = canvas_width // 2
+        image_y = canvas_height // 2
+        
+        # Вычисляем относительные координаты в изображении
+        rel_x = (event_x - image_x + display_width // 2) / display_width
+        rel_y = (event_y - image_y + display_height // 2) / display_height
+        
+        # Ограничиваем координаты
+        rel_x = max(0, min(1, rel_x))
+        rel_y = max(0, min(1, rel_y))
+        
+        # Масштабируем к оригинальному размеру
+        scaled_x = int(rel_x * original_width)
+        scaled_y = int(rel_y * original_height)
+        
+        return scaled_x, scaled_y
+        
     def on_mouse_move(self, event):
         """Обработчик движения мыши"""
-        if self.control_enabled and self.client_socket and hasattr(self, 'last_frame_size'):
+        if self.control_enabled and self.client_socket:
             try:
-                # Получаем размеры canvas и изображения
-                canvas_width = self.canvas.winfo_width()
-                canvas_height = self.canvas.winfo_height()
+                scaled_x, scaled_y = self.scale_coordinates(event.x, event.y)
                 
-                if canvas_width > 1 and canvas_height > 1 and self.last_frame_size:
-                    frame_width, frame_height = self.last_frame_size
-                    
-                    # Вычисляем масштаб
-                    scale_x = frame_width / canvas_width
-                    scale_y = frame_height / canvas_height
-                    
-                    # Масштабируем координаты
-                    scaled_x = int(event.x * scale_x)
-                    scaled_y = int(event.y * scale_y)
-                    
-                    # Ограничиваем координаты размером экрана клиента
-                    scaled_x = max(0, min(scaled_x, frame_width - 1))
-                    scaled_y = max(0, min(scaled_y, frame_height - 1))
-                    
-                    command = {
-                        'type': 'mouse_move',
-                        'x': scaled_x,
-                        'y': scaled_y
-                    }
-                    self.client_socket.send(pickle.dumps(command))
-            except:
-                pass
+                command = {
+                    'type': 'mouse_move',
+                    'x': scaled_x,
+                    'y': scaled_y
+                }
+                self.client_socket.send(pickle.dumps(command))
+            except Exception as e:
+                self.log_message(f"Error sending mouse move: {e}")
                 
     def on_mouse_click(self, event):
         """Обработчик клика левой кнопкой мыши"""
-        if self.control_enabled and self.client_socket and hasattr(self, 'last_frame_size'):
+        if self.control_enabled and self.client_socket:
             try:
-                canvas_width = self.canvas.winfo_width()
-                canvas_height = self.canvas.winfo_height()
+                scaled_x, scaled_y = self.scale_coordinates(event.x, event.y)
                 
-                if canvas_width > 1 and canvas_height > 1 and self.last_frame_size:
-                    frame_width, frame_height = self.last_frame_size
-                    
-                    # Вычисляем масштаб
-                    scale_x = frame_width / canvas_width
-                    scale_y = frame_height / canvas_height
-                    
-                    # Масштабируем координаты
-                    scaled_x = int(event.x * scale_x)
-                    scaled_y = int(event.y * scale_y)
-                    
-                    # Ограничиваем координаты
-                    scaled_x = max(0, min(scaled_x, frame_width - 1))
-                    scaled_y = max(0, min(scaled_y, frame_height - 1))
-                    
+                # Проверяем на двойной клик
+                current_time = time.time()
+                if current_time - self.last_click_time < 0.3:
+                    self.click_count += 1
+                    if self.click_count >= 2:
+                        # Двойной клик
+                        command = {
+                            'type': 'mouse_double_click',
+                            'x': scaled_x,
+                            'y': scaled_y,
+                            'button': 'left'
+                        }
+                        self.click_count = 0
+                    else:
+                        # Одинарный клик
+                        command = {
+                            'type': 'mouse_click',
+                            'x': scaled_x,
+                            'y': scaled_y,
+                            'button': 'left'
+                        }
+                else:
+                    # Одинарный клик
                     command = {
                         'type': 'mouse_click',
                         'x': scaled_x,
                         'y': scaled_y,
                         'button': 'left'
                     }
-                    self.client_socket.send(pickle.dumps(command))
-            except:
-                pass
+                    self.click_count = 1
+                
+                self.last_click_time = current_time
+                self.client_socket.send(pickle.dumps(command))
+                self.log_message(f"Sent mouse click: {scaled_x}, {scaled_y}")
+            except Exception as e:
+                self.log_message(f"Error sending mouse click: {e}")
+                
+    def on_mouse_double_click(self, event):
+        """Обработчик двойного клика левой кнопкой мыши"""
+        if self.control_enabled and self.client_socket:
+            try:
+                scaled_x, scaled_y = self.scale_coordinates(event.x, event.y)
+                
+                command = {
+                    'type': 'mouse_double_click',
+                    'x': scaled_x,
+                    'y': scaled_y,
+                    'button': 'left'
+                }
+                self.client_socket.send(pickle.dumps(command))
+                self.log_message(f"Sent mouse double click: {scaled_x}, {scaled_y}")
+            except Exception as e:
+                self.log_message(f"Error sending mouse double click: {e}")
                 
     def on_mouse_right_click(self, event):
         """Обработчик клика правой кнопкой мыши"""
-        if self.control_enabled and self.client_socket and hasattr(self, 'last_frame_size'):
+        if self.control_enabled and self.client_socket:
             try:
-                canvas_width = self.canvas.winfo_width()
-                canvas_height = self.canvas.winfo_height()
+                scaled_x, scaled_y = self.scale_coordinates(event.x, event.y)
                 
-                if canvas_width > 1 and canvas_height > 1 and self.last_frame_size:
-                    frame_width, frame_height = self.last_frame_size
-                    
-                    # Вычисляем масштаб
-                    scale_x = frame_width / canvas_width
-                    scale_y = frame_height / canvas_height
-                    
-                    # Масштабируем координаты
-                    scaled_x = int(event.x * scale_x)
-                    scaled_y = int(event.y * scale_y)
-                    
-                    # Ограничиваем координаты
-                    scaled_x = max(0, min(scaled_x, frame_width - 1))
-                    scaled_y = max(0, min(scaled_y, frame_height - 1))
-                    
-                    command = {
-                        'type': 'mouse_click',
-                        'x': scaled_x,
-                        'y': scaled_y,
-                        'button': 'right'
-                    }
-                    self.client_socket.send(pickle.dumps(command))
-            except:
-                pass
+                command = {
+                    'type': 'mouse_click',
+                    'x': scaled_x,
+                    'y': scaled_y,
+                    'button': 'right'
+                }
+                self.client_socket.send(pickle.dumps(command))
+                self.log_message(f"Sent mouse right click: {scaled_x}, {scaled_y}")
+            except Exception as e:
+                self.log_message(f"Error sending mouse right click: {e}")
+                
+    def on_mouse_scroll(self, event):
+        """Обработчик прокрутки мыши"""
+        if self.control_enabled and self.client_socket:
+            try:
+                scaled_x, scaled_y = self.scale_coordinates(event.x, event.y)
+                
+                # Определяем направление прокрутки
+                if event.delta > 0:
+                    clicks = 3  # Вверх
+                else:
+                    clicks = -3  # Вниз
+                
+                command = {
+                    'type': 'mouse_scroll',
+                    'x': scaled_x,
+                    'y': scaled_y,
+                    'clicks': clicks
+                }
+                self.client_socket.send(pickle.dumps(command))
+                self.log_message(f"Sent mouse scroll: {clicks} at {scaled_x}, {scaled_y}")
+            except Exception as e:
+                self.log_message(f"Error sending mouse scroll: {e}")
             
     def toggle_control(self):
         """Включает/выключает удаленное управление"""

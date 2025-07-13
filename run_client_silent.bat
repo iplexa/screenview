@@ -3,7 +3,7 @@ title Screen Share Client
 color 0a
 
 echo ========================================
-echo    Screen Share Client
+echo    Screen Share Client - Silent Mode
 echo ========================================
 echo.
 
@@ -16,14 +16,6 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: Проверяем наличие виртуального окружения
-if exist "venv\Scripts\activate.bat" (
-    echo [INFO] Активируем виртуальное окружение...
-    call venv\Scripts\activate.bat
-) else (
-    echo [INFO] Виртуальное окружение не найдено, используем системный Python
-)
-
 :: Проверяем наличие необходимых библиотек
 echo [INFO] Проверяем зависимости...
 python -c "import cv2, numpy, pyautogui, pynput, tkinter" >nul 2>&1
@@ -34,13 +26,16 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [INFO] Запускаем клиент...
-echo [INFO] Введите IP адрес сервера и порт в диалоговом окне
+echo [INFO] Запускаем клиент в тихом режиме...
+echo [INFO] Клиент будет работать в фоновом режиме
+echo [INFO] Для остановки используйте Диспетчер задач
 echo.
 
-:: Запускаем клиент
-python client.py
+:: Запускаем клиент в тихом режиме
+start /min pythonw client.py --silent
 
+echo [INFO] Клиент запущен в фоновом режиме
+echo [INFO] Проверьте Диспетчер задач для остановки процесса
 echo.
-echo [INFO] Клиент завершен
-pause 
+echo Нажмите любую клавишу для выхода...
+pause >nul 
